@@ -1,0 +1,8 @@
+celery
+sentry-sdk
+scrapy
+scrapy-playwright
+playwright
+asyncpg
+meilisearch
+httpx

@@ -1,0 +1,5 @@
+[project]
+name = "safqa-backend"
+version = "0.1.0"
+description = "Safqa FastAPI backend"
+requires-python = ">=3.12"

@@ -1,0 +1,195 @@
+services:
+  nginx:
+    image: ghcr.io/${REGISTRY_ORG:-your-org}/safqa-nginx:${IMAGE_TAG:-latest}
+    depends_on:
+      - frontend
+      - fastapi
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certbot-data:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  frontend:
+    image: ghcr.io/${REGISTRY_ORG:-your-org}/safqa-frontend:${IMAGE_TAG:-latest}
+    expose:
+      - "3000"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  fastapi:
+    image: ghcr.io/${REGISTRY_ORG:-your-org}/safqa-api:${IMAGE_TAG:-latest}
+    env_file:
+      - .env.prod
+    expose:
+      - "8000"
+    depends_on:
+      - pgbouncer
+      - redis
+      - meilisearch
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    env_file:
+      - .env.prod
+    volumes:
+      - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./infra/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    expose:
+      - "6432"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  postgres:
+    image: postgres:15-alpine
+    env_file:
+      - .env.prod
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.7
+    env_file:
+      - .env.prod
+    volumes:
+      - meili_data:/meili_data
+    expose:
+      - "7700"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    env_file:
+      - .env.prod
+    expose:
+      - "5672"
+      - "15672"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  celery-worker:
+    image: ghcr.io/${REGISTRY_ORG:-your-org}/safqa-scraper:${IMAGE_TAG:-latest}
+    command: celery -A celery_app worker --loglevel=info
+    env_file:
+      - .env.prod
+    depends_on:
+      - rabbitmq
+      - redis
+      - pgbouncer
+      - meilisearch
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  celery-beat:
+    image: ghcr.io/${REGISTRY_ORG:-your-org}/safqa-scraper:${IMAGE_TAG:-latest}
+    command: celery -A celery_app beat --loglevel=info
+    env_file:
+      - .env.prod
+    depends_on:
+      - rabbitmq
+      - redis
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/rules:/etc/prometheus/rules:ro
+    expose:
+      - "9090"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    command:
+      - "--path.rootfs=/host"
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    expose:
+      - "9100"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  promtail:
+    image: grafana/promtail:latest
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./infra/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./infra/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    expose:
+      - "3100"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+networks:
+  safqa_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  meili_data:
+  grafana_data:
+  loki_data:
+  certbot-data:
+  certbot-www:

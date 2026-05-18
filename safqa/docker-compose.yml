@@ -1,0 +1,266 @@
+services:
+  nginx:
+    image: nginx:alpine
+    depends_on:
+      - frontend
+      - fastapi
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/sites-available/safqa.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-data:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - safqa_net
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"
+    volumes:
+      - ./frontend:/app
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - safqa_net
+
+  fastapi:
+    image: python:3.12-slim
+    working_dir: /app/app
+    command: sh -c "pip install -r /app/requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8000/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - safqa_net
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - safqa_net
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    env_file:
+      - .env
+    volumes:
+      - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./infra/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "6432"
+    networks:
+      - safqa_net
+
+  postgres:
+    image: postgres:15-alpine
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-safqa} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - safqa_net
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.7
+    env_file:
+      - .env
+    volumes:
+      - meili_data:/meili_data
+    expose:
+      - "7700"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7700/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - safqa_net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_ERLANG_COOKIE: "safqa-dev-cookie"
+      HOME: /tmp/rabbitmq-home
+    expose:
+      - "5672"
+      - "15672"
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_port_connectivity || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    networks:
+      - safqa_net
+
+  celery-worker:
+    build: ./scraper
+    command: celery -A celery_app worker --loglevel=info
+    env_file:
+      - .env
+    volumes:
+      - ./scraper:/app
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      meilisearch:
+        condition: service_healthy
+    networks:
+      - safqa_net
+
+  celery-beat:
+    build: ./scraper
+    command: celery -A celery_app beat --loglevel=info
+    env_file:
+      - .env
+    volumes:
+      - ./scraper:/app
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - safqa_net
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/rules:/etc/prometheus/rules:ro
+    expose:
+      - "9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - safqa_net
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - safqa_net
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    command:
+      - "--path.rootfs=/host"
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    expose:
+      - "9100"
+    restart: unless-stopped
+    networks:
+      - safqa_net
+
+  promtail:
+    image: grafana/promtail:latest
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./infra/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - safqa_net
+
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./infra/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    expose:
+      - "3100"
+    networks:
+      - safqa_net
+
+networks:
+  safqa_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  meili_data:
+  grafana_data:
+  loki_data:
+  certbot-data:
+  certbot-www:

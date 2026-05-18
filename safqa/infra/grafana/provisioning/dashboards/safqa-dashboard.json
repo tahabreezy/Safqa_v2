@@ -1,0 +1,105 @@
+{
+  "title": "Safqa",
+  "uid": "safqa-main",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Tenders Scraped",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(safqa_tenders_scraped_total[5m]))",
+          "legendFormat": "scraped/s"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Scrape Duration",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(safqa_scrape_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "API Request Latency",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(http_request_duration_seconds_bucket[5m])",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Alerts Sent",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(safqa_alerts_sent_total[5m])",
+          "legendFormat": "alerts/s"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Cache Hit Ratio",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(safqa_cache_hits_total[5m])) / (sum(rate(safqa_cache_hits_total[5m])) + sum(rate(safqa_cache_misses_total[5m])))",
+          "legendFormat": "hit ratio"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "PgBouncer Active Connections",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "pgbouncer_pool_clients_active",
+          "legendFormat": "active"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "DLQ Depth",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "safqa_dlq_depth",
+          "legendFormat": "depth"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Scrape Errors",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 16 },
+      "targets": [
+        {
+          "expr": "rate(safqa_scrape_errors_total[5m])",
+          "legendFormat": "{{domain_code}} {{error}}"
+        }
+      ]
+    }
+  ]
+}
